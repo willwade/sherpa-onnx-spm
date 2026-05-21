@@ -19,7 +19,7 @@ permissions:
   contents: write
 
 env:
-  ONNXRUNTIME_VERSION: "1.17.1"
+  ONNXRUNTIME_VERSION: "1.24.4"
 
 jobs:
   check-version:
@@ -72,6 +72,40 @@ jobs:
 
       - name: Clone sherpa-onnx
         run: git clone --depth 1 --branch "v${VERSION}" https://github.com/k2-fsa/sherpa-onnx.git /tmp/sherpa-onnx
+
+      - name: Pre-download onnxruntime for iOS build
+        run: |
+          ORT_VER="${{ env.ONNXRUNTIME_VERSION }}"
+          cd /tmp/sherpa-onnx
+
+          # Patch build-ios.sh to use the new version
+          sed -i.bak "s/onnxruntime_version=1.17.1/onnxruntime_version=${ORT_VER}/" build-ios.sh
+
+          # Pre-download and place where build-ios.sh expects it
+          mkdir -p build-ios/ios-onnxruntime/${ORT_VER}
+          cd build-ios/ios-onnxruntime/${ORT_VER}
+
+          wget -q "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VER}/onnxruntime-ios-static-xcframework-${ORT_VER}.zip"
+          unzip -q "onnxruntime-ios-static-xcframework-${ORT_VER}.zip"
+          mv "onnxruntime-ios-static-xcframework-${ORT_VER}/onnxruntime.xcframework" .
+          rm -rf "onnxruntime-ios-static-xcframework-${ORT_VER}" "onnxruntime-ios-static-xcframework-${ORT_VER}.zip"
+
+          # Create symlinks so build-ios.sh and cmake find what they expect
+          # build-ios.sh checks for onnxruntime.xcframework/ios-arm64/onnxruntime.a
+          # cmake looks for $SHERPA_ONNXRUNTIME_LIB_DIR/libonnxruntime.a
+          # build-ios.sh expects headers at onnxruntime.xcframework/Headers
+          for slice in ios-arm64 ios-arm64_x86_64-simulator; do
+            ln -sf onnxruntime.framework/onnxruntime "onnxruntime.xcframework/${slice}/onnxruntime.a"
+            ln -sf onnxruntime.framework/onnxruntime "onnxruntime.xcframework/${slice}/libonnxruntime.a"
+          done
+          # Top-level Headers directory for SHERPA_ONNXRUNTIME_INCLUDE_DIR
+          cp -R onnxruntime.xcframework/ios-arm64/onnxruntime.framework/Headers onnxruntime.xcframework/Headers
+
+          cd ..
+          ln -sf ${ORT_VER}/onnxruntime.xcframework .
+
+          echo "iOS onnxruntime structure:"
+          find onnxruntime.xcframework -maxdepth 2 -name "*.a" -o -name "Headers" | head -10
 
       # ── iOS Build ──────────────────────────────────────────────
       - name: Build iOS sherpa-onnx
@@ -261,15 +295,120 @@ jobs:
           echo "Merged xcframework contents:"
           ls -la "$XCFW/"
 
-      # ── onnxruntime: download existing xcframework (has iOS + macOS) ──
-      - name: Download onnxruntime xcframework
+      # ── onnxruntime: build combined iOS + macOS xcframework ──
+      - name: Build onnxruntime xcframework (iOS + macOS)
         run: |
           ORT_VER="${{ env.ONNXRUNTIME_VERSION }}"
           mkdir -p /tmp/onnxruntime
           cd /tmp/onnxruntime
-          wget -q "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VER}/onnxruntime.xcframework-${ORT_VER}.tar.bz2"
-          tar xjf "onnxruntime.xcframework-${ORT_VER}.tar.bz2"
-          rm "onnxruntime.xcframework-${ORT_VER}.tar.bz2"
+
+          # Download iOS static xcframework
+          wget -q "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VER}/onnxruntime-ios-static-xcframework-${ORT_VER}.zip"
+          unzip -q "onnxruntime-ios-static-xcframework-${ORT_VER}.zip"
+          rm "onnxruntime-ios-static-xcframework-${ORT_VER}.zip"
+
+          IOS_XCFW="/tmp/onnxruntime/onnxruntime-ios-static-xcframework-${ORT_VER}/onnxruntime.xcframework"
+
+          # Download macOS universal2 static lib
+          wget -q "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VER}/onnxruntime-osx-universal2-static_lib-${ORT_VER}.zip"
+          unzip -q "onnxruntime-osx-universal2-static_lib-${ORT_VER}.zip"
+          rm "onnxruntime-osx-universal2-static_lib-${ORT_VER}.zip"
+
+          MACOS_DIR="/tmp/onnxruntime/onnxruntime-osx-universal2-static_lib-${ORT_VER}"
+
+          # Build combined xcframework manually
+          XCFW="/tmp/onnxruntime/onnxruntime.xcframework"
+          rm -rf "$XCFW"
+          mkdir -p "$XCFW"
+
+          # iOS arm64 (device)
+          mkdir -p "$XCFW/ios-arm64"
+          cp "$IOS_XCFW/ios-arm64/onnxruntime.framework/onnxruntime" "$XCFW/ios-arm64/onnxruntime.a"
+          mkdir -p "$XCFW/ios-arm64/Headers"
+          cp "$IOS_XCFW/ios-arm64/onnxruntime.framework/Headers/"*.h "$XCFW/ios-arm64/Headers/"
+          ln -sf onnxruntime.a "$XCFW/ios-arm64/libonnxruntime.a"
+
+          # iOS arm64+x86_64 (simulator)
+          mkdir -p "$XCFW/ios-arm64_x86_64-simulator"
+          cp "$IOS_XCFW/ios-arm64_x86_64-simulator/onnxruntime.framework/onnxruntime" "$XCFW/ios-arm64_x86_64-simulator/onnxruntime.a"
+          mkdir -p "$XCFW/ios-arm64_x86_64-simulator/Headers"
+          cp "$IOS_XCFW/ios-arm64_x86_64-simulator/onnxruntime.framework/Headers/"*.h "$XCFW/ios-arm64_x86_64-simulator/Headers/"
+          ln -sf onnxruntime.a "$XCFW/ios-arm64_x86_64-simulator/libonnxruntime.a"
+
+          # macOS arm64+x86_64
+          mkdir -p "$XCFW/macos-arm64_x86_64"
+          cp "$MACOS_DIR/lib/libonnxruntime.a" "$XCFW/macos-arm64_x86_64/onnxruntime.a"
+          mkdir -p "$XCFW/macos-arm64_x86_64/Headers"
+          cp "$MACOS_DIR/include/"*.h "$XCFW/macos-arm64_x86_64/Headers/"
+          ln -sf onnxruntime.a "$XCFW/macos-arm64_x86_64/libonnxruntime.a"
+
+          # Write Info.plist
+          cat > "$XCFW/Info.plist" << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>AvailableLibraries</key>
+            <array>
+              <dict>
+                <key>BinaryPath</key>
+                <string>onnxruntime.a</string>
+                <key>HeadersPath</key>
+                <string>Headers</string>
+                <key>LibraryIdentifier</key>
+                <string>ios-arm64</string>
+                <key>LibraryPath</key>
+                <string>onnxruntime.a</string>
+                <key>SupportedArchitectures</key>
+                <array><string>arm64</string></array>
+                <key>SupportedPlatform</key>
+                <string>ios</string>
+              </dict>
+              <dict>
+                <key>BinaryPath</key>
+                <string>onnxruntime.a</string>
+                <key>HeadersPath</key>
+                <string>Headers</string>
+                <key>LibraryIdentifier</key>
+                <string>ios-arm64_x86_64-simulator</string>
+                <key>LibraryPath</key>
+                <string>onnxruntime.a</string>
+                <key>SupportedArchitectures</key>
+                <array><string>arm64</string><string>x86_64</string></array>
+                <key>SupportedPlatform</key>
+                <string>ios</string>
+                <key>SupportedPlatformVariant</key>
+                <string>simulator</string>
+              </dict>
+              <dict>
+                <key>BinaryPath</key>
+                <string>onnxruntime.a</string>
+                <key>HeadersPath</key>
+                <string>Headers</string>
+                <key>LibraryIdentifier</key>
+                <string>macos-arm64_x86_64</string>
+                <key>LibraryPath</key>
+                <string>onnxruntime.a</string>
+                <key>SupportedArchitectures</key>
+                <array><string>arm64</string><string>x86_64</string></array>
+                <key>SupportedPlatform</key>
+                <string>macos</string>
+              </dict>
+            </array>
+            <key>CFBundlePackageType</key>
+            <string>XFWK</string>
+            <key>XCFrameworkFormatVersion</key>
+            <string>1.0</string>
+          </dict>
+          </plist>
+          PLIST
+
+          echo "onnxruntime.xcframework contents:"
+          ls -la "$XCFW/"
+          for d in "$XCFW"/*/; do
+            echo "$(basename "$d"):"
+            ls -la "$d"
+          done
 
       # ── Inject modulemaps ──────────────────────────────────────
       - name: Inject modulemaps
