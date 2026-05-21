@@ -323,24 +323,24 @@ jobs:
 
           # iOS arm64 (device)
           mkdir -p "$XCFW/ios-arm64"
-          cp "$IOS_XCFW/ios-arm64/onnxruntime.framework/onnxruntime" "$XCFW/ios-arm64/onnxruntime.a"
+          cp "$IOS_XCFW/ios-arm64/onnxruntime.framework/onnxruntime" "$XCFW/ios-arm64/libonnxruntime.a"
           mkdir -p "$XCFW/ios-arm64/Headers"
           cp "$IOS_XCFW/ios-arm64/onnxruntime.framework/Headers/"*.h "$XCFW/ios-arm64/Headers/"
-          ln -sf onnxruntime.a "$XCFW/ios-arm64/libonnxruntime.a"
+          ln -sf libonnxruntime.a "$XCFW/ios-arm64/onnxruntime.a"
 
           # iOS arm64+x86_64 (simulator)
           mkdir -p "$XCFW/ios-arm64_x86_64-simulator"
-          cp "$IOS_XCFW/ios-arm64_x86_64-simulator/onnxruntime.framework/onnxruntime" "$XCFW/ios-arm64_x86_64-simulator/onnxruntime.a"
+          cp "$IOS_XCFW/ios-arm64_x86_64-simulator/onnxruntime.framework/onnxruntime" "$XCFW/ios-arm64_x86_64-simulator/libonnxruntime.a"
           mkdir -p "$XCFW/ios-arm64_x86_64-simulator/Headers"
           cp "$IOS_XCFW/ios-arm64_x86_64-simulator/onnxruntime.framework/Headers/"*.h "$XCFW/ios-arm64_x86_64-simulator/Headers/"
-          ln -sf onnxruntime.a "$XCFW/ios-arm64_x86_64-simulator/libonnxruntime.a"
+          ln -sf libonnxruntime.a "$XCFW/ios-arm64_x86_64-simulator/onnxruntime.a"
 
           # macOS arm64+x86_64
           mkdir -p "$XCFW/macos-arm64_x86_64"
-          cp "$MACOS_DIR/lib/libonnxruntime.a" "$XCFW/macos-arm64_x86_64/onnxruntime.a"
+          cp "$MACOS_DIR/lib/libonnxruntime.a" "$XCFW/macos-arm64_x86_64/libonnxruntime.a"
           mkdir -p "$XCFW/macos-arm64_x86_64/Headers"
           cp "$MACOS_DIR/include/"*.h "$XCFW/macos-arm64_x86_64/Headers/"
-          ln -sf onnxruntime.a "$XCFW/macos-arm64_x86_64/libonnxruntime.a"
+          ln -sf libonnxruntime.a "$XCFW/macos-arm64_x86_64/onnxruntime.a"
 
           # Write Info.plist
           cat > "$XCFW/Info.plist" << 'PLIST'
@@ -352,13 +352,13 @@ jobs:
             <array>
               <dict>
                 <key>BinaryPath</key>
-                <string>onnxruntime.a</string>
+                <string>libonnxruntime.a</string>
                 <key>HeadersPath</key>
                 <string>Headers</string>
                 <key>LibraryIdentifier</key>
                 <string>ios-arm64</string>
                 <key>LibraryPath</key>
-                <string>onnxruntime.a</string>
+                <string>libonnxruntime.a</string>
                 <key>SupportedArchitectures</key>
                 <array><string>arm64</string></array>
                 <key>SupportedPlatform</key>
@@ -366,13 +366,13 @@ jobs:
               </dict>
               <dict>
                 <key>BinaryPath</key>
-                <string>onnxruntime.a</string>
+                <string>libonnxruntime.a</string>
                 <key>HeadersPath</key>
                 <string>Headers</string>
                 <key>LibraryIdentifier</key>
                 <string>ios-arm64_x86_64-simulator</string>
                 <key>LibraryPath</key>
-                <string>onnxruntime.a</string>
+                <string>libonnxruntime.a</string>
                 <key>SupportedArchitectures</key>
                 <array><string>arm64</string><string>x86_64</string></array>
                 <key>SupportedPlatform</key>
@@ -382,13 +382,13 @@ jobs:
               </dict>
               <dict>
                 <key>BinaryPath</key>
-                <string>onnxruntime.a</string>
+                <string>libonnxruntime.a</string>
                 <key>HeadersPath</key>
                 <string>Headers</string>
                 <key>LibraryIdentifier</key>
                 <string>macos-arm64_x86_64</string>
                 <key>LibraryPath</key>
-                <string>onnxruntime.a</string>
+                <string>libonnxruntime.a</string>
                 <key>SupportedArchitectures</key>
                 <array><string>arm64</string><string>x86_64</string></array>
                 <key>SupportedPlatform</key>

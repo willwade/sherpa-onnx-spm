@@ -38,8 +38,8 @@ echo "  Checksum (onnxruntime): $CHECKSUM_ONNXRUNTIME"
 
 # Update Package.swift
 sed -i '' "s|^let version = \".*\"|let version = \"${VERSION}\"|" "$PACKAGE_SWIFT"
-sed -i '' "s|^let checksumSherpaOnnx = \".*\"|let checksumSherpaOnnx = \"${CHECKSUM_SHERPA}\"|" "$PACKAGE_SWIFT"
-sed -i '' "s|^let checksumOnnxRuntime = \".*\"|let checksumOnnxRuntime = \"${CHECKSUM_ONNXRUNTIME}\"|" "$PACKAGE_SWIFT"
+sed -i '' "s|^let checksumSherpa = \".*\"|let checksumSherpa = \"${CHECKSUM_SHERPA}\"|" "$PACKAGE_SWIFT"
+sed -i '' "s|^let checksumOrt = \".*\"|let checksumOrt = \"${CHECKSUM_ONNXRUNTIME}\"|" "$PACKAGE_SWIFT"
 
 # Update versions/current-version.txt
 echo "$VERSION" > "$VERSION_FILE"
