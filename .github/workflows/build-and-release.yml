@@ -217,7 +217,7 @@ jobs:
           cp /tmp/onnxruntime-macos/onnxruntime/include/*.h "$SLICE_DIR/Headers/"
 
           # Update Info.plist to include the macOS slice
-          python3 /tmp/sherpa-onnx-spm/scripts/patch-info-plist.py \
+          python3 "$GITHUB_WORKSPACE/scripts/patch-info-plist.py" \
             /tmp/onnxruntime-ios.xcframework.tmp/Info.plist \
             macos-arm64_x86_64 \
             libonnxruntime.dylib
