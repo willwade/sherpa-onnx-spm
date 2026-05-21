@@ -10,6 +10,7 @@ let package = Package(
     name: "SherpaOnnx",
     platforms: [
         .iOS(.v13),
+        .macOS(.v13),
     ],
     products: [
         .library(
@@ -20,12 +21,12 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "sherpa-onnx",
-            url: "https://github.com/uakihir0/sherpa-onnx-spm/releases/download/\(version)/sherpa-onnx.xcframework.zip",
+            url: "https://github.com/willwade/sherpa-onnx-spm/releases/download/\(version)/sherpa-onnx.xcframework.zip",
             checksum: checksumSherpaOnnx
         ),
         .binaryTarget(
             name: "onnxruntime",
-            url: "https://github.com/uakihir0/sherpa-onnx-spm/releases/download/\(version)/onnxruntime.xcframework.zip",
+            url: "https://github.com/willwade/sherpa-onnx-spm/releases/download/\(version)/onnxruntime.xcframework.zip",
             checksum: checksumOnnxRuntime
         ),
         .target(

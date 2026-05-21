@@ -1,6 +1,8 @@
 # sherpa-onnx-spm
 
-A Swift Package Manager distribution of [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) iOS XCFrameworks.
+A Swift Package Manager distribution of [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) XCFrameworks for **iOS and macOS**.
+
+Forked from [uakihir0/sherpa-onnx-spm](https://github.com/uakihir0/sherpa-onnx-spm) with added macOS support.
 
 Automatically tracks the latest sherpa-onnx releases via GitHub Actions and provides pre-built XCFrameworks.
 
@@ -20,14 +22,14 @@ Automatically tracks the latest sherpa-onnx releases via GitHub Actions and prov
 In Xcode, go to **File > Add Package Dependencies...** and enter the following URL:
 
 ```
-https://github.com/uakihir0/sherpa-onnx-spm.git
+https://github.com/willwade/sherpa-onnx-spm.git
 ```
 
 Or add the dependency to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/uakihir0/sherpa-onnx-spm.git", from: "1.0.0")
+    .package(url: "https://github.com/willwade/sherpa-onnx-spm.git", from: "1.0.0")
 ]
 ```
 
@@ -60,6 +62,9 @@ For detailed usage, refer to the [official sherpa-onnx documentation](https://k2
   - arm64 (Device)
   - x86_64 (Simulator)
   - arm64 (Apple Silicon Simulator)
+- macOS 13.0+
+  - arm64 (Apple Silicon)
+  - x86_64 (Intel)
 
 ## License
 

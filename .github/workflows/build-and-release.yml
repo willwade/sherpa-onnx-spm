@@ -2,7 +2,6 @@ name: Build and Release XCFrameworks
 
 on:
   schedule:
-    # Check for new versions every Monday at 06:00 UTC
     - cron: '0 6 * * 1'
   workflow_dispatch:
     inputs:
@@ -19,10 +18,10 @@ on:
 permissions:
   contents: write
 
+env:
+  ONNXRUNTIME_VERSION: "1.17.1"
+
 jobs:
-  # ============================================================
-  # Job 1: Check for new version
-  # ============================================================
   check-version:
     runs-on: ubuntu-latest
     outputs:
@@ -37,11 +36,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Get current published version
           CURRENT=$(cat versions/current-version.txt 2>/dev/null || echo "0.0.0")
           echo "Current version: $CURRENT"
 
-          # Determine target version
           if [[ -n "${{ inputs.sherpa_onnx_version }}" ]]; then
             TARGET="${{ inputs.sherpa_onnx_version }}"
             echo "Manual version specified: $TARGET"
@@ -50,7 +47,6 @@ jobs:
             echo "Latest release: $TARGET"
           fi
 
-          # Check if update is needed
           if [[ "$CURRENT" != "$TARGET" ]] || [[ "${{ inputs.force_rebuild }}" == "true" ]]; then
             echo "update_needed=true" >> "$GITHUB_OUTPUT"
             echo "version=$TARGET" >> "$GITHUB_OUTPUT"
@@ -61,9 +57,6 @@ jobs:
             echo "Already up to date: $CURRENT"
           fi
 
-  # ============================================================
-  # Job 2: Build XCFrameworks
-  # ============================================================
   build:
     needs: check-version
     if: needs.check-version.outputs.update_needed == 'true'
@@ -75,22 +68,166 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: |
-          brew install cmake wget
+        run: brew install cmake wget
 
       - name: Clone sherpa-onnx
-        run: |
-          git clone --depth 1 --branch "v${VERSION}" https://github.com/k2-fsa/sherpa-onnx.git /tmp/sherpa-onnx
+        run: git clone --depth 1 --branch "v${VERSION}" https://github.com/k2-fsa/sherpa-onnx.git /tmp/sherpa-onnx
 
-      - name: Build iOS XCFrameworks
+      # ── iOS Build ──────────────────────────────────────────────
+      - name: Build iOS sherpa-onnx
         run: |
           cd /tmp/sherpa-onnx
           export CMAKE_VERBOSE_MAKEFILE=ON
           bash build-ios.sh
 
+      - name: Install iOS headers
+        run: |
+          cd /tmp/sherpa-onnx/build-ios
+          cmake --build build/os64 --target install
+
+      # ── macOS Build ────────────────────────────────────────────
+      - name: Build macOS sherpa-onnx (universal2)
+        run: |
+          cd /tmp/sherpa-onnx
+          mkdir -p build-macos && cd build-macos
+
+          cmake \
+            -DSHERPA_ONNX_ENABLE_BINARY=OFF \
+            -DSHERPA_ONNX_BUILD_C_API_EXAMPLES=OFF \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_INSTALL_PREFIX=./install \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DSHERPA_ONNX_ENABLE_PYTHON=OFF \
+            -DSHERPA_ONNX_ENABLE_TESTS=OFF \
+            -DSHERPA_ONNX_ENABLE_CHECK=OFF \
+            -DSHERPA_ONNX_ENABLE_PORTAUDIO=OFF \
+            -DSHERPA_ONNX_ENABLE_JNI=OFF \
+            -DSHERPA_ONNX_ENABLE_C_API=ON \
+            -DSHERPA_ONNX_ENABLE_WEBSOCKET=OFF \
+            ../
+
+          make -j4
+          make install
+          rm -fv ./install/include/cargs.h
+
+          libtool -static -o ./install/lib/libsherpa-onnx.a \
+            ./install/lib/libsherpa-onnx-c-api.a \
+            ./install/lib/libsherpa-onnx-core.a \
+            ./install/lib/libkaldi-native-fbank-core.a \
+            ./install/lib/libkissfft-float.a \
+            ./install/lib/libsherpa-onnx-fstfar.a \
+            ./install/lib/libsherpa-onnx-fst.a \
+            ./install/lib/libsherpa-onnx-kaldifst-core.a \
+            ./install/lib/libkaldi-decoder-core.a \
+            ./install/lib/libucd.a \
+            ./install/lib/libpiper_phonemize.a \
+            ./install/lib/libespeak-ng.a \
+            ./install/lib/libssentencepiece_core.a
+
+      # ── Create unified sherpa-onnx.xcframework ────────────────
+      - name: Create unified sherpa-onnx.xcframework (iOS + macOS)
+        run: |
+          cd /tmp/sherpa-onnx
+
+          # iOS simulator: lipo arm64 + x86_64
+          mkdir -p build-ios/build/simulator/lib
+          for f in libkaldi-native-fbank-core.a libkissfft-float.a libsherpa-onnx-c-api.a libsherpa-onnx-core.a \
+                   libsherpa-onnx-fstfar.a libssentencepiece_core.a \
+                   libsherpa-onnx-fst.a libsherpa-onnx-kaldifst-core.a libkaldi-decoder-core.a \
+                   libucd.a libpiper_phonemize.a libespeak-ng.a; do
+            lipo -create build-ios/build/simulator_arm64/lib/${f} \
+                         build-ios/build/simulator_x86_64/lib/${f} \
+                 -output build-ios/build/simulator/lib/${f}
+          done
+
+          libtool -static -o build-ios/build/simulator/libsherpa-onnx.a \
+            build-ios/build/simulator/lib/libkaldi-native-fbank-core.a \
+            build-ios/build/simulator/lib/libkissfft-float.a \
+            build-ios/build/simulator/lib/libsherpa-onnx-c-api.a \
+            build-ios/build/simulator/lib/libsherpa-onnx-core.a \
+            build-ios/build/simulator/lib/libsherpa-onnx-fstfar.a \
+            build-ios/build/simulator/lib/libsherpa-onnx-fst.a \
+            build-ios/build/simulator/lib/libsherpa-onnx-kaldifst-core.a \
+            build-ios/build/simulator/lib/libkaldi-decoder-core.a \
+            build-ios/build/simulator/lib/libucd.a \
+            build-ios/build/simulator/lib/libpiper_phonemize.a \
+            build-ios/build/simulator/lib/libespeak-ng.a \
+            build-ios/build/simulator/lib/libssentencepiece_core.a
+
+          libtool -static -o build-ios/build/os64/libsherpa-onnx.a \
+            build-ios/build/os64/lib/libkaldi-native-fbank-core.a \
+            build-ios/build/os64/lib/libkissfft-float.a \
+            build-ios/build/os64/lib/libsherpa-onnx-c-api.a \
+            build-ios/build/os64/lib/libsherpa-onnx-core.a \
+            build-ios/build/os64/lib/libsherpa-onnx-fstfar.a \
+            build-ios/build/os64/lib/libsherpa-onnx-fst.a \
+            build-ios/build/os64/lib/libsherpa-onnx-kaldifst-core.a \
+            build-ios/build/os64/lib/libkaldi-decoder-core.a \
+            build-ios/build/os64/lib/libucd.a \
+            build-ios/build/os64/lib/libpiper_phonemize.a \
+            build-ios/build/os64/lib/libespeak-ng.a \
+            build-ios/build/os64/lib/libssentencepiece_core.a
+
+          HEADERS_DIR=/tmp/sherpa-onnx/build-ios/install/include
+          mkdir -p "$HEADERS_DIR/sherpa-onnx/c-api"
+          cp /tmp/sherpa-onnx/sherpa-onnx/c-api/c-api.h "$HEADERS_DIR/sherpa-onnx/c-api/"
+
+          rm -rf /tmp/unified-sherpa-onnx.xcframework
+          xcodebuild -create-xcframework \
+            -library build-ios/build/os64/libsherpa-onnx.a \
+              -headers "$HEADERS_DIR" \
+            -library build-ios/build/simulator/libsherpa-onnx.a \
+              -headers "$HEADERS_DIR" \
+            -library build-macos/install/lib/libsherpa-onnx.a \
+              -headers build-macos/install/include \
+            -output /tmp/unified-sherpa-onnx.xcframework
+
+      # ── onnxruntime: iOS + macOS ──────────────────────────────
+      - name: Download iOS onnxruntime xcframework
+        run: |
+          mkdir -p /tmp/onnxruntime-ios
+          cd /tmp/onnxruntime-ios
+          ORT_VER="${{ env.ONNXRUNTIME_VERSION }}"
+          wget -q "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VER}/onnxruntime.xcframework-${ORT_VER}.tar.bz2"
+          tar xjf "onnxruntime.xcframework-${ORT_VER}.tar.bz2"
+          rm "onnxruntime.xcframework-${ORT_VER}.tar.bz2"
+
+      - name: Download macOS onnxruntime
+        run: |
+          ORT_VER="${{ env.ONNXRUNTIME_VERSION }}"
+          mkdir -p /tmp/onnxruntime-macos
+          cd /tmp/onnxruntime-macos
+          wget -q "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VER}/onnxruntime-osx-universal2-${ORT_VER}.tgz"
+          tar xzf "onnxruntime-osx-universal2-${ORT_VER}.tgz"
+          # Rename to consistent dir
+          mv "onnxruntime-osx-universal2-${ORT_VER}" onnxruntime
+
+      - name: Create unified onnxruntime.xcframework (iOS + macOS)
+        run: |
+          # Start with iOS xcframework slices
+          cp -RL /tmp/onnxruntime-ios/onnxruntime.xcframework /tmp/onnxruntime-ios.xcframework.tmp
+
+          # Create macOS slice in the xcframework
+          SLICE_DIR="/tmp/onnxruntime-ios.xcframework.tmp/macos-arm64_x86_64"
+          mkdir -p "$SLICE_DIR"
+          cp /tmp/onnxruntime-macos/onnxruntime/lib/libonnxruntime.${{ env.ONNXRUNTIME_VERSION }}.dylib \
+             "$SLICE_DIR/libonnxruntime.dylib"
+          mkdir -p "$SLICE_DIR/Headers"
+          cp /tmp/onnxruntime-macos/onnxruntime/include/*.h "$SLICE_DIR/Headers/"
+
+          # Update Info.plist to include the macOS slice
+          python3 /tmp/sherpa-onnx-spm/scripts/patch-info-plist.py \
+            /tmp/onnxruntime-ios.xcframework.tmp/Info.plist \
+            macos-arm64_x86_64 \
+            libonnxruntime.dylib
+
+          mv /tmp/onnxruntime-ios.xcframework.tmp /tmp/unified-onnxruntime.xcframework
+
+      # ── Inject modulemaps ──────────────────────────────────────
       - name: Inject modulemap into sherpa-onnx.xcframework
         run: |
-          XCFW_DIR="/tmp/sherpa-onnx/build-ios/sherpa-onnx.xcframework"
+          XCFW_DIR="/tmp/unified-sherpa-onnx.xcframework"
           for slice_dir in "$XCFW_DIR"/*/; do
             headers_dir="${slice_dir}Headers"
             if [[ -d "$headers_dir" ]]; then
@@ -106,10 +243,10 @@ jobs:
 
       - name: Inject modulemap into onnxruntime.xcframework
         run: |
-          ONNX_XCFW_DIR="/tmp/sherpa-onnx/build-ios/ios-onnxruntime/onnxruntime.xcframework"
+          XCFW_DIR="/tmp/unified-onnxruntime.xcframework"
 
           # Top-level shared Headers directory
-          ONNX_HEADERS_DIR="${ONNX_XCFW_DIR}/Headers"
+          ONNX_HEADERS_DIR="${XCFW_DIR}/Headers"
           if [[ -d "$ONNX_HEADERS_DIR" && ! -f "${ONNX_HEADERS_DIR}/module.modulemap" ]]; then
             cat > "${ONNX_HEADERS_DIR}/module.modulemap" << 'MODULEMAP'
           module onnxruntime {
@@ -120,8 +257,8 @@ jobs:
             echo "Injected modulemap into: ${ONNX_HEADERS_DIR}"
           fi
 
-          # Per-platform slice Headers directories
-          for slice_dir in "$ONNX_XCFW_DIR"/*/; do
+          # Per-slice Headers directories
+          for slice_dir in "$XCFW_DIR"/*/; do
             slice_name="$(basename "$slice_dir")"
             if [[ "$slice_name" != "Headers" && -d "${slice_dir}Headers" ]]; then
               if [[ ! -f "${slice_dir}Headers/module.modulemap" ]]; then
@@ -136,27 +273,22 @@ jobs:
             fi
           done
 
-      - name: Package sherpa-onnx.xcframework
+      # ── Package ────────────────────────────────────────────────
+      - name: Package xcframeworks
         run: |
-          cd /tmp/sherpa-onnx/build-ios
-          zip -ry sherpa-onnx.xcframework.zip sherpa-onnx.xcframework/
-          echo "CHECKSUM_SHERPA=$(swift package compute-checksum sherpa-onnx.xcframework.zip)" >> "$GITHUB_ENV"
-
-      - name: Package onnxruntime.xcframework
-        run: |
-          # The onnxruntime.xcframework in ios-onnxruntime/ is a symlink.
-          # Copy with dereference to avoid zip symlink issues.
-          cp -RL /tmp/sherpa-onnx/build-ios/ios-onnxruntime/onnxruntime.xcframework /tmp/onnxruntime.xcframework
           cd /tmp
-          zip -r onnxruntime.xcframework.zip onnxruntime.xcframework/
-          echo "CHECKSUM_ONNXRUNTIME=$(swift package compute-checksum onnxruntime.xcframework.zip)" >> "$GITHUB_ENV"
+          zip -ry sherpa-onnx.xcframework.zip unified-sherpa-onnx.xcframework/
+          zip -ry onnxruntime.xcframework.zip unified-onnxruntime.xcframework/
+
+          echo "CHECKSUM_SHERPA=$(swift package compute-checksum /tmp/sherpa-onnx.xcframework.zip)" >> "$GITHUB_ENV"
+          echo "CHECKSUM_ONNXRUNTIME=$(swift package compute-checksum /tmp/onnxruntime.xcframework.zip)" >> "$GITHUB_ENV"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: xcframeworks
           path: |
-            /tmp/sherpa-onnx/build-ios/sherpa-onnx.xcframework.zip
+            /tmp/sherpa-onnx.xcframework.zip
             /tmp/onnxruntime.xcframework.zip
           retention-days: 1
 
@@ -174,9 +306,6 @@ jobs:
             /tmp/checksum-onnxruntime.txt
           retention-days: 1
 
-  # ============================================================
-  # Job 3: Create GitHub Release and update Package.swift
-  # ============================================================
   release:
     needs: [check-version, build]
     runs-on: ubuntu-latest
@@ -206,22 +335,22 @@ jobs:
           CHECKSUM_ONNXRUNTIME=$(cat /tmp/checksums/checksum-onnxruntime.txt)
           echo "sherpa=$CHECKSUM_SHERPA" >> "$GITHUB_OUTPUT"
           echo "onnxruntime=$CHECKSUM_ONNXRUNTIME" >> "$GITHUB_OUTPUT"
-          echo "Checksum (sherpa-onnx): $CHECKSUM_SHERPA"
-          echo "Checksum (onnxruntime): $CHECKSUM_ONNXRUNTIME"
 
       - name: Create GitHub Release
         run: |
-          # Delete existing release if present
           gh release delete "${VERSION}" --yes 2>/dev/null || true
           git push origin --delete "${VERSION}" 2>/dev/null || true
 
-          # Find xcframework zip files
           SHERPA_ZIP=$(find /tmp/xcframeworks -name "sherpa-onnx.xcframework.zip" | head -1)
           ONNX_ZIP=$(find /tmp/xcframeworks -name "onnxruntime.xcframework.zip" | head -1)
 
           gh release create "${VERSION}" \
             --title "sherpa-onnx v${VERSION}" \
-            --notes "Pre-built iOS XCFrameworks for sherpa-onnx v${VERSION}
+            --notes "Pre-built XCFrameworks (iOS + macOS) for sherpa-onnx v${VERSION}
+
+          ## Platforms
+          - iOS 13.0+ (arm64 device, arm64/x86_64 simulator)
+          - macOS 13.0+ (arm64, x86_64)
 
           ## Checksums (SHA-256)
           - \`sherpa-onnx.xcframework.zip\`: \`${{ steps.checksums.outputs.sherpa }}\`
@@ -246,5 +375,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Package.swift versions/current-version.txt
-          git commit -m "Update to sherpa-onnx v${VERSION}"
+          git commit -m "Update to sherpa-onnx v${VERSION} (iOS + macOS)"
           git push
