@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# Clone sherpa-onnx, build iOS XCFrameworks, and inject modulemaps.
+# Clone sherpa-onnx, build iOS XCFrameworks, and create a single merged
+# xcframework containing both sherpa-onnx and onnxruntime (avoids Xcode
+# module.modulemap collision when two binary targets share the same output dir).
 #
 set -euo pipefail
 
@@ -23,7 +25,7 @@ if [[ -z "$VERSION" ]]; then
   usage
 fi
 
-echo "=== Building sherpa-onnx v${VERSION} for iOS ==="
+echo "=== Building sherpa-onnx v${VERSION} ==="
 
 # Working directory
 rm -rf "$WORK_DIR"
@@ -48,21 +50,6 @@ fi
 
 echo "--- sherpa-onnx.xcframework built successfully ---"
 
-# Inject modulemap into sherpa-onnx.xcframework
-echo "--- Injecting modulemap into sherpa-onnx.xcframework ---"
-for slice_dir in "$XCFW_DIR"/*/; do
-  headers_dir="${slice_dir}Headers"
-  if [[ -d "$headers_dir" ]]; then
-    cat > "${headers_dir}/module.modulemap" << 'MODULEMAP'
-module sherpa_onnx {
-    header "sherpa-onnx/c-api/c-api.h"
-    export *
-}
-MODULEMAP
-    echo "  Injected modulemap into: ${headers_dir}"
-  fi
-done
-
 # Locate onnxruntime.xcframework
 echo "--- Locating onnxruntime.xcframework ---"
 ONNX_XCFW_DIR="build-ios/ios-onnxruntime/onnxruntime.xcframework"
@@ -71,45 +58,74 @@ if [[ ! -d "$ONNX_XCFW_DIR" ]]; then
   exit 1
 fi
 
-# Inject modulemap into onnxruntime.xcframework
-echo "--- Injecting modulemap into onnxruntime.xcframework ---"
-ONNX_HEADERS_DIR="${ONNX_XCFW_DIR}/Headers"
-if [[ -d "$ONNX_HEADERS_DIR" ]]; then
-  # onnxruntime may have a shared top-level Headers directory
-  if [[ ! -f "${ONNX_HEADERS_DIR}/module.modulemap" ]]; then
-    cat > "${ONNX_HEADERS_DIR}/module.modulemap" << 'MODULEMAP'
-module onnxruntime {
-    header "onnxruntime_c_api.h"
-    export *
-}
-MODULEMAP
-    echo "  Injected modulemap into: ${ONNX_HEADERS_DIR}"
-  else
-    echo "  modulemap already exists in: ${ONNX_HEADERS_DIR}"
-  fi
-fi
+# --- Merge into single xcframework ---
+echo "--- Merging sherpa-onnx and onnxruntime into single xcframework ---"
 
-# Inject into per-platform slice Headers directories
-for slice_dir in "$ONNX_XCFW_DIR"/*/; do
-  if [[ -d "${slice_dir}" && "$(basename "$slice_dir")" != "Headers" ]]; then
-    # Inject if the slice has a Headers directory
-    if [[ -d "${slice_dir}Headers" && ! -f "${slice_dir}Headers/module.modulemap" ]]; then
-      cat > "${slice_dir}Headers/module.modulemap" << 'MODULEMAP'
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+for slice_dir in "$XCFW_DIR"/*/; do
+  slice_name="$(basename "$slice_dir")"
+  headers_dir="${slice_dir}Headers"
+
+  if [[ ! -d "$headers_dir" ]]; then
+    continue
+  fi
+
+  # Find matching onnxruntime slice
+  onnx_slice="${ONNX_XCFW_DIR}/${slice_name}"
+  if [[ ! -d "$onnx_slice" ]]; then
+    echo "  WARNING: No matching onnxruntime slice for ${slice_name}, skipping"
+    continue
+  fi
+
+  echo "  Merging slice: ${slice_name}"
+
+  # Copy onnxruntime static library into sherpa-onnx slice
+  for lib in "$onnx_slice"/*.a; do
+    if [[ -f "$lib" ]]; then
+      cp "$lib" "$slice_dir/"
+      echo "    Copied $(basename "$lib")"
+    fi
+  done
+
+  # Copy onnxruntime headers into sherpa-onnx Headers/
+  onnx_headers="${onnx_slice}/Headers"
+  if [[ -d "$onnx_headers" ]]; then
+    for h in "$onnx_headers"/*.h; do
+      if [[ -f "$h" ]]; then
+        cp "$h" "$headers_dir/"
+      fi
+    done
+    echo "    Copied onnxruntime headers"
+  fi
+
+  # Write combined module.modulemap with both modules
+  cat > "${headers_dir}/module.modulemap" << 'MODULEMAP'
+module sherpa_onnx {
+    header "sherpa-onnx/c-api/c-api.h"
+    export *
+}
 module onnxruntime {
     header "onnxruntime_c_api.h"
     export *
 }
 MODULEMAP
-      echo "  Injected modulemap into: ${slice_dir}Headers"
-    fi
-  fi
+  echo "    Wrote combined modulemap"
 done
 
-# Copy artifacts to output directory
+# Patch Info.plist to include both libraries
+echo "--- Patching Info.plist ---"
+python3 "$SCRIPT_DIR/patch-info-plist.py" "$XCFW_DIR/Info.plist" ios-arm64 libsherpa-onnx.a
+python3 "$SCRIPT_DIR/patch-info-plist.py" "$XCFW_DIR/Info.plist" ios-arm64 onnxruntime.a
+python3 "$SCRIPT_DIR/patch-info-plist.py" "$XCFW_DIR/Info.plist" ios-arm64_x86_64-simulator libsherpa-onnx.a
+python3 "$SCRIPT_DIR/patch-info-plist.py" "$XCFW_DIR/Info.plist" ios-arm64_x86_64-simulator onnxruntime.a
+python3 "$SCRIPT_DIR/patch-info-plist.py" "$XCFW_DIR/Info.plist" macos-arm64_x86_64 libsherpa-onnx.a
+python3 "$SCRIPT_DIR/patch-info-plist.py" "$XCFW_DIR/Info.plist" macos-arm64_x86_64 onnxruntime.a
+
+# Copy merged xcframework to output
 OUTPUT_DIR="${WORK_DIR}/output"
 mkdir -p "$OUTPUT_DIR"
 cp -R "$XCFW_DIR" "$OUTPUT_DIR/"
-cp -R "$ONNX_XCFW_DIR" "$OUTPUT_DIR/"
 
 echo ""
 echo "=== Build completed ==="
@@ -118,11 +134,9 @@ echo ""
 
 # Verify architectures
 echo "--- Verifying architectures ---"
-for xcfw in "$OUTPUT_DIR"/*.xcframework; do
-  echo "$(basename "$xcfw"):"
-  for lib in "$xcfw"/*/*.a "$xcfw"/*/*/*.a 2>/dev/null; do
-    if [[ -f "$lib" ]]; then
-      echo "  $(basename "$(dirname "$lib")"): $(lipo -info "$lib" 2>/dev/null || echo "not a fat binary")"
-    fi
-  done
+for lib in "$OUTPUT_DIR"/sherpa-onnx.xcframework/*/*.a; do
+  if [[ -f "$lib" ]]; then
+    slice="$(basename "$(dirname "$lib")")"
+    echo "  ${slice}/$(basename "$lib"): $(lipo -info "$lib" 2>/dev/null || echo "not a fat binary")"
+  fi
 done
