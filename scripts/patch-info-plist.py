@@ -15,15 +15,18 @@ def patch_info_plist(plist_path, slice_name, library_name):
         "HeadersPath": "Headers",
     }
 
-    existing_identifiers = {lib.get("LibraryIdentifier") for lib in available_libraries}
-    if slice_name not in existing_identifiers:
+    existing = {
+        (lib.get("LibraryIdentifier"), lib.get("BinaryPath"))
+        for lib in available_libraries
+    }
+    if (slice_name, library_name) not in existing:
         available_libraries.append(new_lib)
         plist["AvailableLibraries"] = available_libraries
         with open(plist_path, "wb") as f:
             plistlib.dump(plist, f)
-        print(f"Added {slice_name} to Info.plist")
+        print(f"Added {library_name} for {slice_name} to Info.plist")
     else:
-        print(f"{slice_name} already in Info.plist, skipping")
+        print(f"{slice_name}/{library_name} already in Info.plist, skipping")
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
