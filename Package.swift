@@ -3,7 +3,7 @@
 import PackageDescription
 
 let version = "1.13.4"
-let checksumCombined = "2a7e9e38d93253da8deee07849e94c50a3a9b46db26566526c895f851ee7b942"
+let checksumCombined = "a7d1bba822da9ac044271041b0cd579337e028a8b7c5d0971de2368d3233f7ae"
 
 let package = Package(
     name: "SherpaOnnx",

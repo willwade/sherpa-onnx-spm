@@ -9,6 +9,9 @@ set -euo pipefail
 
 VERSION="${1:?Usage: $0 <version>}"
 
+# Save script directory before changing directories
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 WORK_DIR="$(pwd)/merge-work-${VERSION}"
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
@@ -39,7 +42,6 @@ fi
 
 # Merge onnxruntime into sherpa-onnx slices
 echo "--- Merging slices ---"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 for slice_dir in "$SHERPA_XCFW"/*/; do
   slice_name="$(basename "$slice_dir")"
