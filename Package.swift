@@ -2,7 +2,7 @@
 
 import PackageDescription
 
-let version = "1.13.5"
+let version = "1.13.6"
 let checksumCombined = "66fbec263ff19b26343a28a1e30be58ae642d2feb6c306fdaa3d6df9e5257bfd"
 
 let package = Package(
