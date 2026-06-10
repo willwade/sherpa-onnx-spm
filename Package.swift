@@ -2,7 +2,7 @@
 
 import PackageDescription
 
-let version = "1.13.2"
+let version = "1.13.14"
 let checksumSherpa = "0017147fda683ce99f9390b43825c529966ad29b40ac67e37a43f2ba61d5264d"
 let checksumOrt = "8c9db6bff51a7282a7b3ad08b9e87a88b41f03e02bf8e7dbbd53c6a66df75512"
 
