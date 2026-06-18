@@ -1,0 +1,30 @@
+#!/bin/bash
+# pre-push hook: refuse to move or delete any tag.
+#
+# Swift Package Manager pins tag SHAs into downstream Package.resolved
+# files. Moving or deleting a tag (force-push, --force-with-lease, etc.)
+# breaks every downstream consumer's CI the next time they resolve from
+# scratch. See RELEASING.md.
+#
+# Install with: ./scripts/install-pre-push-hook.sh
+
+set -e
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    if [[ "$remote_ref" == refs/tags/* ]]; then
+        # remote_sha is all-zero if the tag doesn't exist remotely yet
+        # (a normal new-tag push). Otherwise the tag exists and we're
+        # either moving it (local_sha != remote_sha) or deleting it
+        # (local_sha is all-zero). Either case is rejected.
+        if [[ "$remote_sha" != "0000000000000000000000000000000000000000" ]]; then
+            echo "ERROR: refusing to move or delete tag $remote_ref" >&2
+            echo "" >&2
+            echo "Moving or deleting a published tag breaks downstream" >&2
+            echo "Package.resolved pins. Cut a new tag instead — see" >&2
+            echo "RELEASING.md." >&2
+            exit 1
+        fi
+    fi
+done
+
+exit 0
